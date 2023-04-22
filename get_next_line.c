@@ -3,124 +3,138 @@
 /*                                                        :::      ::::::::   */
 /*   get_next_line.c                                    :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: nhamdan <nhamdan@student.42.fr>            +#+  +:+       +#+        */
+/*   By: nihamdan <nihamdan@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2022/04/28 13:33:24 by nhamdan           #+#    #+#             */
-/*   Updated: 2022/04/28 15:41:08 by nhamdan          ###   ########.fr       */
+/*   Created: 2023/04/07 11:07:19 by nihamdan          #+#    #+#             */
+/*   Updated: 2023/04/22 13:04:41 by nihamdan         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "get_next_line.h"
 
-// Copie la ligne jusqu'au /n et ne renvoie que celle-ci 
-
-char	*get_only_line(char *buf)
+int	read_and_stash(int fd, char **stash)
 {
-	char	*only_line;
-	int		sbuf;
-	int		sal;
+	char	*buf;
+	char	*tmp;
+	size_t	read_size;
 
-	if (buf == NULL)
-		return (NULL);
-	sbuf = ft_strlen(buf);
-	sal = ft_strlen(ft_strchr(buf, '\n')) - 1;
-	only_line = (char *) malloc(sbuf - sal + 1);
-	ft_strlcpy(only_line, buf, sbuf - sal + 1);
-	return (only_line);
-}
-
-// Copie le reste de buf après le /n et ne renvoie que ça 
-
-char	*buf_line(char	*buf, char	*only_line)
-{
-	char	*rbuf;
-	int		sline;
-	int		stot;
-
-	if (buf == NULL || only_line == NULL)
-		return (NULL);
-	stot = ft_strlen(buf);
-	sline = ft_strlen(only_line);
-	if (sline <= 0)
+	buf = ft_calloc(BUFFER_SIZE + 1, sizeof(char));
+	read_size = read(fd, buf, BUFFER_SIZE);
+	if (read_size <= 0)
 	{
 		free(buf);
-		return (NULL);
+		return (read_size);
 	}
-	rbuf = malloc(stot - sline + 1);
-	ft_strlcpy(rbuf, buf + sline, stot - sline + 1);
+	tmp = ft_strdup(*stash);
+	*stash = ft_calloc(ft_strlen(tmp) + ft_strlen(buf) + 1, sizeof(char));
+	*stash = ft_strcat(*stash, tmp);
+	*stash = ft_strcat(*stash, buf);
+	free(tmp);
 	free(buf);
-	return (rbuf);
+	tmp = NULL;
+	buf = NULL;
+	return (read_size);
 }
 
-// Copie les read successifs dans buf
-
-static	char	*gnl_cat(char	*buf, char	*mbufsize)
+char	*copy_and_clean(char **stash, size_t i, long read_size)
 {
-	char	*rbuf;
-	int		sbuf;
-	int		smbuf;
+	char	*line;
+	char	*tmp;
 
-	if (buf == NULL || mbufsize == NULL)
-		return (NULL);
-	sbuf = ft_strlen(buf) + 1;
-	smbuf = ft_strlen(mbufsize);
-	rbuf = malloc(sbuf + smbuf);
-	ft_strlcpy(rbuf, buf, sbuf);
-	ft_strcat(rbuf, mbufsize);
-	free(buf);
-	return (rbuf);
-}
-
-// Extrait une ligne quand le /n est détécté
-
-static char	*get_line(int fd, char	*buf)
-{
-	char	*mbufsize;
-	int		ret;
-
-	mbufsize = (char *) malloc(BUFFER_SIZE + 1);
-	if (!mbufsize)
+	tmp = NULL;
+	line = ft_calloc(i + 1, sizeof(char));
+	if (ft_strlen(*stash) > i)
 	{
-		free(mbufsize);
-		free(buf);
+		tmp = ft_calloc(ft_strlen(*stash) - (i - 1), sizeof(char));
+		tmp = ft_strcat(tmp, *stash + (i));
+	}
+	ft_strlcpy(line, *stash, i);
+	if (*stash)
+	{
+		free(*stash);
+		*stash = NULL;
+	}
+	*stash = ft_strdup(tmp);
+	if (!read_size && !(line))
+	{
+		free(line);
+		line = NULL;
 		return (NULL);
 	}
-	ret = 42;
-	while (ret && !ft_strchr(buf, '\n'))
+	return (line);
+}
+
+int	extract_line_2(char **stash, int fd, long *read_size, long *read_max)
+{
+	long	i;
+
+	i = 0;
+	while ((*stash)[i] != '\n' && *read_size != 0)
 	{
-		ret = read(fd, mbufsize, BUFFER_SIZE);
-		if (ret == -1)
+		if (i < *read_max)
+			i++;
+		else if (i == *read_max)
 		{
-			free(buf);
-			free(mbufsize);
-			return (NULL);
+			*read_size = read_and_stash(fd, stash);
+			if (*read_size == -1)
+			{
+				free(*stash);
+				*stash = NULL;
+				return (-2);
+			}
+			*read_max += *read_size;
 		}
-		mbufsize[ret] = 0;
-		buf = gnl_cat(buf, mbufsize);
 	}
-	free(mbufsize);
-	return (buf);
+	if ((*stash)[i] == '\n')
+		i++;
+	return (i);
+}
+
+char	*extract_line(int fd, char **stash)
+{
+	long	i;
+	long	read_size;
+	long	read_max;
+	char	*line;
+
+	read_max = 0;
+	read_size = 1;
+	if (*stash)
+		read_max = ft_strlen(*stash);
+	i = extract_line_2(stash, fd, &read_size, &read_max);
+	if (i == -2)
+		return (NULL);
+	line = copy_and_clean(stash, i, read_size);
+	if (read_size == 0 && *stash != NULL)
+	{
+		free(*stash);
+		*stash = NULL;
+	}
+	return (line);
 }
 
 char	*get_next_line(int fd)
 {
-	char static	*buf;
-	char		*only_line;
+	static char		*stash[OPEN_MAX];
+	char			*line;
 
-	if (fd < 0 || BUFFER_SIZE <= 0)
-		return (NULL);
-	if (!buf)
-		buf = ft_strdup("");
-	buf = get_line(fd, buf);
-	if (buf == NULL)
-		return (NULL);
-	only_line = get_only_line(buf);
-	buf = buf_line(buf, only_line);
-	if (only_line[0] == '\0')
+	line = NULL;
+	if (fd < 0 || BUFFER_SIZE < 1 || read(fd, line, 0) < 0)
 	{
-		free(buf);
-		free(only_line);
+		if (stash[fd])
+			free(stash[fd]);
+			stash[fd] = NULL;
 		return (NULL);
 	}
-	return (only_line);
+	if (!stash[fd])
+		stash[fd] = ft_calloc(1, 1);
+	line = extract_line(fd, &(stash[fd]));
+	if (line == NULL || line[0] == '\0')
+	{
+		free(stash[fd]);
+		free(line);
+		stash[fd] = NULL;
+		return (NULL);
+	}
+	return (line);
 }
